@@ -1,7 +1,7 @@
 {
   "name": "my-ai-skills-plugin",
   "version": "0.1.0",
-  "description": "Shared AI skills for Codex and Claude Code: reusable skills, commands, agents, and hooks.",
+  "description": "Shared AI skills for Codex and Claude Code.",
   "author": {
     "name": "yoyo999888",
     "email": "shengyuanyao@gmail.com",
@@ -11,22 +11,5 @@
   "repository": "https://github.com/yoyo999888/my-ai-skills-plugin",
   "license": "MIT",
   "keywords": ["ai", "skills", "codex", "claude-code", "plugin"],
-  "skills": "./skills/",
-  "hooks": "./hooks/codex-hooks.json",
-  "interface": {
-    "displayName": "My AI Skills",
-    "shortDescription": "Reusable AI skills for Codex and Claude Code.",
-    "longDescription": "A collection of portable skills, commands, agents, and hooks that work across Codex and Claude Code.",
-    "developerName": "yoyo999888",
-    "category": "Developer Tools",
-    "capabilities": ["Interactive", "Write"],
-    "websiteURL": "https://github.com/yoyo999888/my-ai-skills-plugin",
-    "privacyPolicyURL": "https://github.com/yoyo999888/my-ai-skills-plugin",
-    "termsOfServiceURL": "https://github.com/yoyo999888/my-ai-skills-plugin",
-    "defaultPrompt": [
-      "列出这个插件提供的技能",
-      "用 hello-skill 演示一次技能调用"
-    ],
-    "brandColor": "#2563EB"
-  }
+  "skills": "./skills/"
 }
