@@ -39,8 +39,7 @@ description: 把用户给出的提示内容整理成一个新技能，加入 my-
 4. **bump 版本号（发布必需）**：把三个 manifest 的 `version` 同步 patch +1（例如 0.1.0 → 0.1.1）。`marketplace.json` 里有 `metadata.version` 和 `plugins[0].version` 两处：
 
    ```bash
-   cd "$TMP"
-   python3 - <<'PY'
+   ( cd "$TMP" && python3 - <<'PY'
    import json, pathlib
    def bump(v): a,b,c = v.split("."); return f"{a}.{b}.{int(c)+1}"
    # .claude-plugin/plugin.json
@@ -55,18 +54,18 @@ description: 把用户给出的提示内容整理成一个新技能，加入 my-
    p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
    print(nv)
    PY
+   )
    ```
 
-5. **commit 并 push（发布）**，push 被拒则 rebase 重试：
+5. **commit 并 push（发布）**，push 被拒则 rebase 重试。全程用 `git -C "$TMP"`，**不要 `cd` 进临时目录**（下一步要删它，cd 进去再删会导致后续命令 `getcwd` 失败）：
 
    ```bash
-   cd "$TMP"
-   git add -A
-   git commit -m "Add skill: <name>"
-   git push origin HEAD:main || { git pull --rebase origin main && git push origin HEAD:main; }
+   git -C "$TMP" add -A
+   git -C "$TMP" commit -m "Add skill: <name>"
+   git -C "$TMP" push origin HEAD:main || { git -C "$TMP" pull --rebase origin main && git -C "$TMP" push origin HEAD:main; }
    ```
 
-6. **清理**：`rm -rf "$TMP"`。
+6. **清理**：`rm -rf "$TMP"`（因全程未 `cd` 进去，删除安全）。
 
 7. **报告**：告诉用户新技能的相对路径、新版本号、commit。并提示：**发布已到 GitHub，但本机已装的插件要 `claude plugin update` / `codex plugin marketplace upgrade` 才拿到新技能。**
 

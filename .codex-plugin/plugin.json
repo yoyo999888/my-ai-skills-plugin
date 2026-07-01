@@ -1,6 +1,6 @@
 {
   "name": "my-ai-skills-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared AI skills for Codex and Claude Code.",
   "author": {
     "name": "yoyo999888",
@@ -10,6 +10,12 @@
   "homepage": "https://github.com/yoyo999888/my-ai-skills-plugin",
   "repository": "https://github.com/yoyo999888/my-ai-skills-plugin",
   "license": "MIT",
-  "keywords": ["ai", "skills", "codex", "claude-code", "plugin"],
+  "keywords": [
+    "ai",
+    "skills",
+    "codex",
+    "claude-code",
+    "plugin"
+  ],
   "skills": "./skills/"
 }
