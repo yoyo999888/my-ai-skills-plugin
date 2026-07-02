@@ -57,3 +57,12 @@
 - override 应用后重算世界矩阵:0 超差;
 - mods 路径解析:0.00% 失败;
 - 性能:manifests ~4min / 3,238 prefab glb ~15min / 库 117min / 场景 20-100min。
+
+## 11. 变体装配的性能真相(2026-07-03 三轮 profile)
+先后两个假设被打脸:重名探测(Blender 5 已修,10k 同名 0.2s)、obj.copy 平方级(部分真但换掉没救)。
+**真相:在挂大量 collection/链接数据的 Main 里,「创建一个对象」本身 ≈2.5-7ms**,objects.new / obj.copy / duplicates_make_real 三种 API 同价,小 Main 只快 3 倍——Python 层到此为地板。
+已落地修复(Port 装配 1290s→880s):
+- `all_objects` 是惰性视图,循环中 link 新对象会**截断迭代**→先 list() 快照(曾静默丢件);
+- 按 prefab 缓存源对象描述符:同 prefab 的 N 个变体只读一次链接对象属性;
+- `users_collection` 别进循环(每次扫全库 collection,profile 84s):拷贝只在自己的 vcol 里,直接 unlink + try/except(removed 子树会重叠);
+- 编辑体验靠「分区 collection」:按层级路径前两级建嵌套 collection,Outliner exclude 整区 = 从 depsgraph 卸载(隐藏不省成本,排除才省)。

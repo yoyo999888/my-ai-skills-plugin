@@ -56,6 +56,27 @@ linked = {p: bpy.data.collections.get(col_map[p]) for p in need}
 linked = {p: c for p, c in linked.items() if c is not None}
 print(f'SCENE_LINKED {len(linked)}/{len(need)} (缺库 {len(absent)})')
 
+# 分区 collection:按 Unity 场景层级路径的前两级建嵌套 collection。
+# 与 empty 父链并存:empty 管变换分组,collection 管 View Layer 排除(整区从 depsgraph 卸载)。
+dcols = {}
+def district_col(path):
+    if not path: return root
+    segs = path.split('/')
+    k1 = segs[0]
+    if k1 not in dcols:
+        c = bpy.data.collections.new(k1)
+        c['group_path'] = k1
+        root.children.link(c)
+        dcols[k1] = c
+    if len(segs) == 1: return dcols[k1]
+    k2 = k1 + '/' + segs[1]
+    if k2 not in dcols:
+        c = bpy.data.collections.new(segs[1])
+        c['group_path'] = k2
+        dcols[k1].children.link(c)
+        dcols[k2] = c
+    return dcols[k2]
+
 groups = {}
 def group_empty(path):
     if not path: return None
@@ -63,7 +84,7 @@ def group_empty(path):
     head, _, name = path.rpartition('/')
     e = bpy.data.objects.new(name, None)
     e.empty_display_size = 0.1
-    root.objects.link(e)
+    district_col(path).objects.link(e)
     e.parent = group_empty(head)
     groups[path] = e
     return e
@@ -77,34 +98,79 @@ def subtree(objs_by_parent, o):
     for c in objs_by_parent.get(o, []): out += subtree(objs_by_parent, c)
     return out
 
+# 每个 prefab 的源对象描述符缓存:同一 prefab 的 N 个变体重复读同一批链接对象,
+# bpy 属性访问是主要成本(profile: make_variant 自身 172s/8k实例)——读一次,拷 N 次。
+_desc_cache = {}
+_IDENT = Matrix.Identity(4)
+def prefab_desc(prefab):
+    got = _desc_cache.get(prefab)
+    if got is not None: return got
+    src = list(linked[prefab].all_objects)  # all_objects 惰性视图,必须快照
+    idx = {o: i for i, o in enumerate(src)}
+    desc = []
+    for o in src:
+        mpi = o.matrix_parent_inverse
+        desc.append((
+            o.name, o.data,
+            None if mpi == _IDENT else mpi.copy(),
+            o.matrix_basis.copy(),
+            o.hide_viewport,
+            dict(o.items()) or None,
+            (o.empty_display_size, o.empty_display_type, o.instance_type, o.instance_collection)
+                if o.type == 'EMPTY' else None,
+            [(i, s.material) for i, s in enumerate(o.material_slots) if s.link == 'OBJECT']
+                if o.type == 'MESH' else None,
+            idx.get(o.parent, -1),
+            o.get('u_path', ''),
+        ))
+    _desc_cache[prefab] = desc
+    return desc
+
 def make_variant(prefab, mods, vid):
-    src_col = linked[prefab]
-    vcol = bpy.data.collections.new(f'VAR_{vid:04d}_{src_col.name[:40]}')
+    vcol = bpy.data.collections.new(f'VAR_{vid:04d}_{linked[prefab].name[:40]}')
     # 资产内默认禁用(hide)的堆叠备选子树不拷贝——不可见且是对象数大头;
     # 除非本变体有 active:true mod 涉及它(目标本身/其祖先/其后代)
     show_paths = [m['tpath'] for m in mods if m['type'] == 'active' and m.get('value')]
-    def want(o):
-        if not o.hide_viewport: return True
-        up = o.get('u_path', '')
+    desc = prefab_desc(prefab)
+    def want(d):
+        if not d[4]: return True
+        up = d[9]
         return any(sp == up or sp.startswith(up + '/') or up.startswith(sp + '/')
                    for sp in show_paths)
-    omap = {}
-    for o in src_col.all_objects:
-        if not want(o): continue
-        n = o.copy()
-        omap[o] = n
-        vcol.objects.link(n)
-    roots = []
-    for o, n in omap.items():
-        if o.parent in omap: n.parent = omap[o.parent]
-        else: n.parent = None; roots.append(n)
-    # 路径索引:库构建时已在每个对象存 u_path(资产侧消歧路径,copy() 会带过来)
+    new = bpy.data.objects.new
+    link = vcol.objects.link
+    copies = [None] * len(desc)
+    for i, d in enumerate(desc):
+        if not want(d): continue
+        n = new(d[0], d[1])
+        if d[2] is not None: n.matrix_parent_inverse = d[2]
+        n.matrix_basis = d[3]
+        if d[4]: n.hide_viewport = n.hide_render = True
+        if d[5]:
+            for k, v in d[5].items(): n[k] = v
+        if d[6] is not None:
+            n.empty_display_size, n.empty_display_type, n.instance_type, n.instance_collection = d[6]
+        if d[7]:
+            slots = n.material_slots
+            for si, mat in d[7]:
+                if si < len(slots):
+                    slots[si].link = 'OBJECT'; slots[si].material = mat
+        copies[i] = n
+        link(n)
+    # 父链重挂 + u_path 路径索引 + 子表,一次循环全建(全用描述符,不回读 bpy 属性)
     paths = {}
-    for o, n in omap.items():
-        paths.setdefault(n.get('u_path', ''), []).append(n)
     kids = {}
-    for o, n in omap.items():
-        if n.parent is not None: kids.setdefault(n.parent, []).append(n)
+    roots = []
+    for i, d in enumerate(desc):
+        n = copies[i]
+        if n is None: continue
+        paths.setdefault(d[9], []).append(n)
+        p = copies[d[8]] if d[8] >= 0 else None
+        if p is not None:
+            n.parent = p
+            kids.setdefault(p, []).append(n)
+        else:
+            roots.append(n)
     for m in mods:
         tp = m.get('tpath', '')
         if tp.startswith('!'):  # Unity 侧 pathMap 查表失败的兜底路径,无法应用
@@ -156,8 +222,11 @@ def make_variant(prefab, mods, vid):
         elif m['type'] == 'removed':
             cand = paths.get(m['tpath'], [])
             if len(cand) == 1:
+                # 拷贝只在 vcol 里,直接 unlink——users_collection 每次要扫全库 collection(profile: 84s)
+                # removed 子树可能重叠,已摘除的跳过
                 for d in subtree(kids, cand[0]):
-                    for uc in list(d.users_collection): uc.objects.unlink(d)
+                    try: vcol.objects.unlink(d)
+                    except RuntimeError: pass
             else: warn['removed_ambig'] += 1
     # 变体根对齐:根对象保持自身局部矩阵(库里已是根 TRS 归零后的内容)
     return vcol
@@ -179,8 +248,9 @@ for inst in man['instances']:
     e = bpy.data.objects.new(inst['name'], None)
     e.instance_type = 'COLLECTION'
     e.instance_collection = col
-    root.objects.link(e)
-    e.parent = group_empty(inst['path'].rpartition('/')[0])
+    parent_path = inst['path'].rpartition('/')[0]
+    district_col(parent_path).objects.link(e)
+    e.parent = group_empty(parent_path)
     e.matrix_world = conv(inst['matrix'])
     e['unity_path'] = inst['path']; e['prefab'] = inst['prefab']; e['guid'] = inst.get('guid', '')
     if mods: e['mods'] = json.dumps(mods, ensure_ascii=False)
@@ -206,5 +276,5 @@ if LOOSE and os.path.exists(LOOSE):
 os.makedirs(os.path.dirname(os.path.abspath(OUT)), exist_ok=True)
 bpy.ops.wm.save_as_mainfile(filepath=OUT, relative_remap=True)
 print(f'SCENE_OK instances={n}(纯净 {pure} / 变体实例 {varused},变体 {len(variants)}) '
-      f'hidden={hidden} skipped={skipped} groups={len(groups)} loose_objs={loose_n} '
+      f'hidden={hidden} skipped={skipped} groups={len(groups)} districts={len(dcols)} loose_objs={loose_n} '
       f'warn={warn} t={time.time()-t0:.0f}s -> {OUT}')
