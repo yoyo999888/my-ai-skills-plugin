@@ -1,6 +1,6 @@
 {
   "name": "my-ai-skills-plugin",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "一套可复用的 AI 技能插件：为 Claude Code 与 Codex 提供共享的 skills、commands、agents 和 hooks。",
   "author": {
     "name": "yoyo999888",
