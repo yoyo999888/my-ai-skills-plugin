@@ -7,14 +7,14 @@
   },
   "metadata": {
     "description": "my-ai-skills-plugin 技能插件市场",
-    "version": "0.1.5"
+    "version": "0.1.6"
   },
   "plugins": [
     {
       "name": "my-ai-skills-plugin",
       "source": "./",
       "description": "一套可复用的 AI 技能插件：为 Claude Code 与 Codex 提供共享的 skills、commands、agents 和 hooks。",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "category": "productivity",
       "tags": [
         "ai",
