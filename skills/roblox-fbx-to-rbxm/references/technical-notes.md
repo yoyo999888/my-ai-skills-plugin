@@ -15,6 +15,13 @@ Model AssetId
 
 The generic converter does not need to predict or locally reconstruct these facts. It asks Roblox to load the asset and serializes the returned Model directly.
 
+The same boundary is authoritative for scale. Successful upload and a non-empty
+RBXM do not prove that FBX units survived import. The cloud task therefore records
+the aggregate bounds and each MeshPart's size and position. Callers with an
+authoritative source size should pass it through `--expected-size`; the converter
+compares each axis using a relative tolerance, independent of the caller's unit
+system.
+
 ## Why cloud binary serialization is used
 
 Open Cloud Luau Execution supports binary output. The task runs:
@@ -50,3 +57,18 @@ If a downstream project requires local rbx-dom parsing, use that project's prove
 The converter accepts an FBX at any local path without a Unity project, manifest, GUID convention, upload queue, or project-specific registry. Roblox still controls accepted FBX features, moderation, mesh limits, size normalization, embedded material handling and permissions.
 
 The output contains whatever Roblox's current `model-fbx` importer returns. External textures and separately published animation assets are outside this converter's responsibility.
+
+## Scale provenance
+
+This skill deliberately has no default game unit. A source may use studs, meters,
+centimeters, tile-local units, or another convention. The calling project owns:
+
+- the expected three-axis bounds;
+- the DCC-to-game conversion;
+- scene-origin and pivot policy;
+- any world placement transform applied after import.
+
+For Blender FBX, `Apply Scalings = FBX Unit Scale` avoids a common default-export
+scale mismatch. This is an FBX metadata/export rule, not a declaration that every
+project uses the same geometry unit. A dimension-sensitive run is verified only
+when the project-provided expected size matches the cloud-loaded bounds.

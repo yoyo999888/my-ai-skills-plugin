@@ -35,6 +35,8 @@ local FBX
    - 在指定 universe/place 创建并读取 Luau Execution task。
 3. 测试 Place 必须能 `LoadAsset` 目标 Creator 的私有 Model。
 4. 推荐通过 `ROBLOX_UPLOADER_CONFIG` 指向配置文件，不要把 API key 写在命令行、技能或仓库中。
+5. 尺寸敏感资产必须由调用项目先声明预期的三轴包围盒。单位由项目决定；本技能不假设
+   meters、studs、厘米或任何固定换算。
 
 配置兼容现有 uploader 格式：
 
@@ -70,8 +72,10 @@ SKILL_DIR="<本 SKILL.md 所在目录>"
 ### 1. 必须先 dry-run
 
 ```bash
+EXPECTED_SIZE="${EXPECTED_SIZE:?set project-provided X,Y,Z}"
 python3 "$SKILL_DIR/scripts/fbx_to_rbxm.py" /absolute/path/model.fbx \
-  --output /absolute/path/model.rbxm
+  --output /absolute/path/model.rbxm \
+  --expected-size "$EXPECTED_SIZE"
 ```
 
 不带 `--execute` 时只输出计划，不上传、不创建 Luau task、不写 RBXM。检查：
@@ -80,17 +84,27 @@ python3 "$SKILL_DIR/scripts/fbx_to_rbxm.py" /absolute/path/model.fbx \
 - Creator 类型/ID 正确；
 - Luau Execution universe/place 正确；
 - 输出不会覆盖不应覆盖的文件；
+- `expectedBoundsSize` 来自当前项目的源资产或 manifest，而不是经验值；
 - `wouldUpload` 是否符合预期。
+
+若资产没有权威尺寸，可以省略 `--expected-size`，但报告只会标记为 `reported`，不能把它当成
+尺度已验证。Blender FBX 应使用 `Apply Scalings = FBX Unit Scale`，并在上传前由 Blender 或其他
+可靠解析器回读包围盒；几何的具体倍率仍由项目坐标系决定。
 
 ### 2. 用户明确要求上传后才执行
 
 上传是外部持久变更。得到用户授权后执行：
 
 ```bash
+EXPECTED_SIZE="${EXPECTED_SIZE:?set project-provided X,Y,Z}"
 python3 "$SKILL_DIR/scripts/fbx_to_rbxm.py" /absolute/path/model.fbx \
   --output /absolute/path/model.rbxm \
+  --expected-size "$EXPECTED_SIZE" \
+  --size-tolerance 0.02 \
   --execute
 ```
+
+`--size-tolerance` 是每轴相对误差，不携带单位。只有明确需要更松或更严的项目才覆盖默认值。
 
 默认同时生成：
 
@@ -117,6 +131,10 @@ model.rbxm.report.json     # task、Model、子件数量和输出校验报告
 - `summary.status` 为 `loaded`；
 - `.rbxm` 非空且包含 Roblox 二进制模型头；
 - `meshPartCount` 与预期相符；若 FBX 本来应有 mesh 而结果为 0，视为失败。
+- 报告包含整体 `boundsMin`、`boundsMax`、`boundsSize`，以及每个 MeshPart 的 `Size`、
+  `Position` 和 `MeshId`；
+- 提供 `--expected-size` 时，`geometryValidation.status` 必须为 `passed`。任一轴超出相对容差，
+  即使上传、审核、LoadAsset 和 RBXM 序列化都成功，也必须视为失败。
 
 可直接打开检查：
 
@@ -139,7 +157,9 @@ find /absolute/input -type f -iname '*.fbx' -print0 | while IFS= read -r -d '' f
 done
 ```
 
-批量前先挑一个代表性 FBX 完成 dry-run、上传、LoadAsset 和 Studio 视觉检查，再展开全量。
+尺寸敏感的批量任务必须在上述循环中接入调用项目自己的 manifest/解析逻辑，为每个 FBX 传入
+`--expected-size`；不能把代表格尺寸复用于所有文件。批量前先挑一个代表性 FBX 完成 dry-run、
+上传、LoadAsset、尺寸门禁和 Studio 视觉检查，再展开全量。
 
 ## 关键规则
 
@@ -148,6 +168,8 @@ done
 - 不拍平或重新推算子 MeshPart transform；`.rbxm` 直接来自云端 Model 序列化。
 - 不把 API key 输出到日志、命令参数或产物；报告只保留非秘密 ID。
 - 不用 `--force-upload` 处理普通重试；它会创建新的 Roblox Asset。
+- 不从文件名、游戏类型或某次项目经验猜单位与目标尺寸；由调用者通过 `--expected-size` 声明。
+- 不在装配层用经验缩放掩盖源 FBX 单位错误。先修源 FBX，再创建新资产并重新验证 Cloud bounds。
 - “任意 FBX”表示不依赖特定项目目录或 manifest，不代表绕过 Roblox 的格式、审核、三角面、尺寸和权限限制。
 - FBX 的外部贴图不会自动成为可靠的项目材质真相。需要可控 PBR/贴图时，单独上传并在 prefab 组装层绑定。
 
@@ -156,7 +178,10 @@ done
 - `rbxcloud` 创建成功但暂时不能 `LoadAsset`：保留 checkpoint，稍后原命令重跑；不要强制重传。
 - `403`：检查 API key scope、Creator 权限和 Luau Execution universe/place 权限。
 - `load_failed`：检查测试 Place 是否能访问该 Creator 的私有 Asset，以及资产是否仍在审核/处理中。
-- FBX 中单件尺寸超过 Roblox 上限时，Roblox 可能等比归一化；应在源资产阶段预缩放或切块。
+- Cloud `boundsSize` 与源资产预期不符：先检查 FBX unit metadata、DCC 导出单位、对象 scale 是否
+  应用、pivot/scene origin 和各子件局部包围盒。Blender 默认 FBX 缩放常导致异常放大；优先使用
+  `FBX Unit Scale`，但最终几何倍率仍以调用项目的预期尺寸为准。
+- 某轴恰好落在平台尺寸边界不是“导入成功”的证据；结合 `--expected-size` 判断是否发生归一化。
 - 云端 `SerializationService` 生成的 `.rbxm` 可由 Studio 原生打开；老版本 rbx-dom/dmf 若报属性 wire type 不兼容，不要丢弃或拍平模型，优先升级解析器，或另走项目已有的 JSON facts + 本地 Lune 序列化路径。
 
 实现细节与产物语义见 `references/technical-notes.md`。

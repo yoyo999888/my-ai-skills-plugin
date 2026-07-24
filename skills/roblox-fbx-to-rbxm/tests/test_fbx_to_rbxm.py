@@ -44,8 +44,24 @@ class HelpersTest(unittest.TestCase):
         source = MODULE.cloud_script("123456")
         self.assertIn("local assetId = 123456", source)
         self.assertIn("SerializeInstancesAsync", source)
+        self.assertIn("boundsSize", source)
+        self.assertIn("meshParts", source)
         with self.assertRaises(ValueError):
             MODULE.cloud_script("1; error('injected')")
+
+    def test_parse_size_requires_three_positive_numbers(self):
+        self.assertEqual(MODULE.parse_size("1, 2.5,3"), [1.0, 2.5, 3.0])
+        with self.assertRaises(MODULE.argparse.ArgumentTypeError):
+            MODULE.parse_size("1,2")
+        with self.assertRaises(MODULE.argparse.ArgumentTypeError):
+            MODULE.parse_size("1,0,3")
+
+    def test_expected_size_validation_is_unit_agnostic(self):
+        summary = {"meshPartCount": 2, "boundsSize": [101.0, 49.5, 25.0]}
+        passed = MODULE.validate_cloud_geometry(summary, [100.0, 50.0, 25.0], 0.02)
+        failed = MODULE.validate_cloud_geometry(summary, [100.0, 40.0, 25.0], 0.02)
+        self.assertEqual(passed["status"], "passed")
+        self.assertEqual(failed["status"], "failed")
 
     def test_binary_atomic_write_keeps_rbxm_magic(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -72,8 +88,20 @@ class HelpersTest(unittest.TestCase):
                 "status": "loaded",
                 "modelAssetId": "123456",
                 "meshPartCount": 2,
+                "boundsSize": [10.0, 20.0, 30.0],
+                "meshParts": [
+                    {"name": "A", "size": [10.0, 20.0, 30.0], "position": [0.0, 0.0, 0.0]}
+                ],
             }
-            argv = [str(SCRIPT), str(fbx), "--output", str(output), "--execute"]
+            argv = [
+                str(SCRIPT),
+                str(fbx),
+                "--output",
+                str(output),
+                "--expected-size",
+                "10,20,30",
+                "--execute",
+            ]
             with (
                 mock.patch.object(MODULE.sys, "argv", argv),
                 mock.patch.object(MODULE, "load_settings", return_value=settings),
@@ -89,8 +117,55 @@ class HelpersTest(unittest.TestCase):
             report = json.loads(Path(str(output) + ".report.json").read_text())
             self.assertEqual(checkpoint["assetId"], "123456")
             self.assertEqual(report["status"], "complete")
+            self.assertEqual(report["geometryValidation"]["status"], "passed")
             self.assertNotIn("apiKey", report)
             self.assertTrue(output.read_bytes().startswith(MODULE.RBXM_MAGIC))
+
+    def test_execute_fails_when_cloud_bounds_exceed_tolerance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fbx = root / "model.fbx"
+            output = root / "model.rbxm"
+            fbx.write_bytes(b"mock-fbx")
+            settings = {
+                "apiKey": "secret",
+                "creatorId": "42",
+                "creatorType": "group",
+                "universeId": "100",
+                "placeId": "200",
+                "configPath": "",
+            }
+            summary = {
+                "status": "loaded",
+                "modelAssetId": "123456",
+                "meshPartCount": 1,
+                "boundsSize": [100.0, 20.0, 30.0],
+                "meshParts": [],
+            }
+            argv = [
+                str(SCRIPT),
+                str(fbx),
+                "--output",
+                str(output),
+                "--expected-size",
+                "10,20,30",
+                "--execute",
+            ]
+            with (
+                mock.patch.object(MODULE.sys, "argv", argv),
+                mock.patch.object(MODULE, "load_settings", return_value=settings),
+                mock.patch.object(MODULE, "upload_fbx", return_value="123456"),
+                mock.patch.object(
+                    MODULE,
+                    "run_cloud_serialization",
+                    return_value=(MODULE.RBXM_MAGIC + b"payload", summary, "tasks/abc"),
+                ),
+            ):
+                self.assertEqual(MODULE.main(), 1)
+            report = json.loads(Path(str(output) + ".report.json").read_text())
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["geometryValidation"]["status"], "failed")
+            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

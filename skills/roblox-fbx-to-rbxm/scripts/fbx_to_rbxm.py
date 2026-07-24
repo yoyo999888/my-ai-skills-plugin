@@ -73,6 +73,50 @@ def nested_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def parse_size(value: str) -> list[float]:
+    try:
+        size = [float(item.strip()) for item in value.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError("size must be three comma-separated numbers") from None
+    if len(size) != 3 or any(component <= 0 for component in size):
+        raise argparse.ArgumentTypeError("size must contain three positive numbers")
+    return size
+
+
+def validate_cloud_geometry(
+    summary: dict[str, Any],
+    expected_size: list[float] | None,
+    tolerance: float,
+) -> dict[str, Any]:
+    actual = summary.get("boundsSize")
+    if not (
+        isinstance(actual, list)
+        and len(actual) == 3
+        and all(isinstance(component, (int, float)) and component > 0 for component in actual)
+    ):
+        raise RuntimeError("Cloud summary has no valid three-axis boundsSize")
+    if int(summary.get("meshPartCount") or 0) <= 0:
+        raise RuntimeError("Cloud summary contains no MeshParts")
+
+    result: dict[str, Any] = {
+        "status": "reported" if expected_size is None else "passed",
+        "actualSize": actual,
+        "expectedSize": expected_size,
+        "relativeTolerance": tolerance,
+    }
+    if expected_size is None:
+        return result
+
+    relative_errors = [
+        abs(float(actual[index]) - expected) / expected
+        for index, expected in enumerate(expected_size)
+    ]
+    result["relativeErrors"] = relative_errors
+    if any(error > tolerance for error in relative_errors):
+        result["status"] = "failed"
+    return result
+
+
 def load_settings(args: argparse.Namespace, *, strict: bool) -> dict[str, str]:
     config: dict[str, Any] = {}
     config_path_value = args.config or os.environ.get("ROBLOX_UPLOADER_CONFIG", "")
@@ -305,13 +349,45 @@ local assetId = {asset_id}
 local loaded = InsertService:LoadAsset(assetId)
 local counts = {{}}
 local meshPartCount = 0
+local meshParts = {{}}
+local boundsMin = Vector3.new(math.huge, math.huge, math.huge)
+local boundsMax = Vector3.new(-math.huge, -math.huge, -math.huge)
 for _, instance in ipairs(loaded:GetDescendants()) do
     counts[instance.ClassName] = (counts[instance.ClassName] or 0) + 1
+    if instance:IsA("BasePart") then
+        local half = instance.Size * 0.5
+        for _, sx in ipairs({{-1, 1}}) do
+            for _, sy in ipairs({{-1, 1}}) do
+                for _, sz in ipairs({{-1, 1}}) do
+                    local point = instance.CFrame:PointToWorldSpace(
+                        Vector3.new(half.X * sx, half.Y * sy, half.Z * sz)
+                    )
+                    boundsMin = Vector3.new(
+                        math.min(boundsMin.X, point.X),
+                        math.min(boundsMin.Y, point.Y),
+                        math.min(boundsMin.Z, point.Z)
+                    )
+                    boundsMax = Vector3.new(
+                        math.max(boundsMax.X, point.X),
+                        math.max(boundsMax.Y, point.Y),
+                        math.max(boundsMax.Z, point.Z)
+                    )
+                end
+            end
+        end
+    end
     if instance:IsA("MeshPart") then
         meshPartCount += 1
+        table.insert(meshParts, {{
+            name = instance.Name,
+            meshId = instance.MeshId,
+            size = {{ instance.Size.X, instance.Size.Y, instance.Size.Z }},
+            position = {{ instance.Position.X, instance.Position.Y, instance.Position.Z }},
+        }})
     end
 end
 local pivot = {{ loaded:GetPivot():GetComponents() }}
+local boundsSize = boundsMax - boundsMin
 local summary = {{
     status = "loaded",
     modelAssetId = tostring(assetId),
@@ -320,6 +396,10 @@ local summary = {{
     modelPivotCFrame = pivot,
     descendantCount = #loaded:GetDescendants(),
     meshPartCount = meshPartCount,
+    meshParts = meshParts,
+    boundsMin = {{ boundsMin.X, boundsMin.Y, boundsMin.Z }},
+    boundsMax = {{ boundsMax.X, boundsMax.Y, boundsMax.Z }},
+    boundsSize = {{ boundsSize.X, boundsSize.Y, boundsSize.Z }},
     classCounts = counts,
 }}
 local buffer = SerializationService:SerializeInstancesAsync({{ loaded }})
@@ -417,6 +497,17 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--display-name", default="")
     parser.add_argument("--description", default="Uploaded by roblox-fbx-to-rbxm")
     parser.add_argument("--rbxcloud", default="rbxcloud")
+    parser.add_argument(
+        "--expected-size",
+        type=parse_size,
+        help="Expected cloud-loaded bounds size as X,Y,Z in the caller's chosen unit system",
+    )
+    parser.add_argument(
+        "--size-tolerance",
+        type=float,
+        default=0.02,
+        help="Maximum relative error per bounds axis when --expected-size is set (default: 0.02)",
+    )
     parser.add_argument("--execute", action="store_true", help="Perform upload/task writes; otherwise dry-run")
     parser.add_argument("--force-upload", action="store_true", help="Create a new Model asset even if checkpoint matches")
     parser.add_argument("--poll-ms", type=int, default=2000)
@@ -429,6 +520,8 @@ def make_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = make_parser()
     args = parser.parse_args()
+    if args.size_tolerance < 0:
+        parser.error("--size-tolerance must be non-negative")
     fbx = Path(args.fbx).expanduser().resolve()
     if not fbx.is_file():
         parser.error(f"FBX not found: {fbx}")
@@ -470,6 +563,8 @@ def main() -> int:
         "reuseCheckpointAsset": reuse,
         "wouldUpload": not reuse,
         "wouldRunLuauExecution": True,
+        "expectedBoundsSize": args.expected_size,
+        "relativeSizeTolerance": args.size_tolerance,
     }
     print(json.dumps(plan, ensure_ascii=False, indent=2))
     if not args.execute:
@@ -512,17 +607,30 @@ def main() -> int:
             raise RuntimeError("Cloud summary did not confirm loaded Model")
         if str(summary.get("modelAssetId") or "") != asset_id:
             raise RuntimeError("Cloud summary modelAssetId does not match uploaded asset")
+        report["cloudTaskPath"] = task_path
+        report["summary"] = summary
+        geometry_validation = validate_cloud_geometry(
+            summary,
+            args.expected_size,
+            args.size_tolerance,
+        )
+        report["geometryValidation"] = geometry_validation
+        if geometry_validation["status"] == "failed":
+            raise RuntimeError(
+                "Cloud-loaded bounds differ from --expected-size beyond tolerance: "
+                f"actual={geometry_validation['actualSize']} "
+                f"expected={geometry_validation['expectedSize']} "
+                f"relativeErrors={geometry_validation['relativeErrors']}"
+            )
         write_bytes_atomic(output, rbxm)
 
         report.update(
             {
                 "status": "complete",
                 "completedAt": now_iso(),
-                "cloudTaskPath": task_path,
                 "outputBytes": len(rbxm),
                 "outputSha256": hashlib.sha256(rbxm).hexdigest(),
                 "rbxmMagicValid": True,
-                "summary": summary,
             }
         )
         write_json_atomic(report_path, report)
