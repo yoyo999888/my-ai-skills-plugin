@@ -1,6 +1,6 @@
 ---
 name: roblox-docs
-description: Roblox 引擎经验知识库，按条目索引已经实测验证过的结论（渲染合批、LOD、资产上传等）。回答任何 Roblox 性能/渲染/资产问题前先查这里，避免凭直觉或从别的引擎类比。触发词：roblox 性能、draw call、合批、batching、LOD、RenderFidelity、图集、atlas、mip、SurfaceAppearance、上传 asset、roblox-docs。
+description: Roblox 引擎经验知识库，按条目索引已经实测验证过的结论（渲染合批、LOD、资产上传、Server Authority 与物理成本等）。回答任何 Roblox 性能/渲染/物理/权威模式/资产问题前先查这里，避免凭直觉或从别的引擎类比。触发词：roblox 性能、draw call、合批、batching、LOD、RenderFidelity、图集、atlas、mip、SurfaceAppearance、上传 asset、Server Authority、AuthorityMode、BindToSimulation、服务端权威、客户端预测、重模拟、PhysicsStepTimeMs、物理成本、NPC 复制、Camera 免复制、roblox-docs。
 ---
 
 # roblox-docs
@@ -22,12 +22,16 @@ Roblox 引擎闭源、不让写 shader，官方文档在细节上多处与实测
 | 贴图图集与 mip | 格子边界对齐 2 的幂则 mip 生成零串色；UV 内缩只防 mip 0~2 的采样 | `references/atlas-and-mip.md` |
 | 测量方法 | `Stats.FrameRateManager.Batches` 可从 Lua 读；配 `run-in-roblox` 可全自动跑实验 | `references/measurement.md` |
 | 资产上传 | Open Cloud + `rbxcloud` 上传 mesh/贴图的可用流程与两个坑 | `references/asset-upload.md` |
+| **Server Authority** | 服务端跑**完整模拟**不是验证；六开关有 enum/不可读两坑；模拟相禁 `Destroy`；**成本只认云端数字**（真实会话 43% 帧预算，本机低估一倍）；碰撞超线性拐点云端前移；`Camera` 免复制成立且不额外收费 | `references/server-authority.md` |
 | 踩过的坑 | 被实测推翻过的 5 条「合理推断」，以及它们为什么听起来对 | `references/lessons.md` |
 
 ## 何时使用
 
 - 被问到 Roblox 的 draw call、合批、LOD、贴图内存、图集、SurfaceAppearance、RenderFidelity 等问题。
-- 要给 Roblox 项目做性能相关的设计决策（美术规格、材质数量、LOD 策略、图集排布）。
+- 被问到 `AuthorityMode` / Server Authority / 客户端预测 / 重模拟 / `BindToSimulation`，
+  或要估算服务端物理成本、载具与 NPC 的规模上限。
+- 要给 Roblox 项目做性能相关的设计决策（美术规格、材质数量、LOD 策略、图集排布、权威模式、
+  可用对象密度）。
 - 想把一个新的 Roblox 实测结论沉淀下来。
 
 ## 怎么用
@@ -58,3 +62,6 @@ Roblox 引擎闭源、不让写 shader，官方文档在细节上多处与实测
 - **不收未验证的结论。** 官方文档的说法也算未验证 —— 本库里已有多处实测与官方文档不符。
 - **结论会过期。** 每条都带日期和引擎版本；引擎更新后要重测，不要无限期沿用。
 - **不收从别的引擎类比来的推断。** 那正是本库要防的错误来源。
+- **开发机数字不等于生产数字。** 性能类结论必须标清测量硬件；Server Authority 条目里
+  同一负载在 Apple M4 与 Roblox 云端服务器上差 2.25 倍，且**差距不是常数**（只在超线性区
+  拉开）。只在开发机上测出的上限会被系统性高估。
