@@ -13,6 +13,7 @@ description: 用 rojo serve 做 Roblox Studio 热同步开发的三件事——�
 - 改了文件后需要确认「Studio 还连着吗」「这次改动到底同步进去了吗」。
 - 用户报"Studio 里没变化"，要定位是 rojo 没看见文件、还是 Studio 断了、还是 Studio 收了没应用。
 - 连接坏了要恢复：重启 rojo 服务、清端口占用、重开 Studio。
+- 要打开一个开发 place，需要先避免重复打开 Studio 实例。
 
 ---
 
@@ -40,20 +41,47 @@ description: 用 rojo serve 做 Roblox Studio 热同步开发的三件事——�
    ```
 
    顺序反了，Studio 启动时没服务可连，自动重连要等下一次轮询或干脆需要手动点。
-4. **用 `roblox-studio:` 协议打开对应的远程 place**：
+4. **打开前先确认本地没有已开着的 Studio 实例**（见下方「打开 place 前必做：清掉已有实例」）。
+5. **用 `roblox-studio:` 协议打开对应的远程 place**：
 
    ```bash
    open "roblox-studio:1+launchmode:edit+task:EditPlace+placeId:<PLACE_ID>+universeId:<UNIVERSE_ID>"
    ```
 
    `universeId` 就是项目文件里的 `gameId`，两者同一个值、不同叫法。（打开 Studio 的完整方式、以及只带 placeId 会报错的坑，见 `open-roblox-studio-mac` 技能。）
-5. **不知道 pid / uid 时**：先去项目文件里查 `placeId` / `gameId`；查不到再问用户，**不要猜、不要随便填一个测试 place**。若只有 placeId，可用公开 API 反查：
+6. **不知道 pid / uid 时**：先去项目文件里查 `placeId` / `gameId`；查不到再问用户，**不要猜、不要随便填一个测试 place**。若只有 placeId，可用公开 API 反查：
 
    ```bash
    curl -s "https://apis.roblox.com/universes/v1/places/<PLACE_ID>/universe"
    ```
 
-6. Studio 启动、加载完 place 后即自动连上，此后改文件自动推送。
+7. Studio 启动、加载完 place 后即自动连上，此后改文件自动推送。
+
+### 打开 place 前必做：清掉已有实例
+
+**每次 `open "roblox-studio:..."` 之前，先确认本机没有已经开着的 Studio 实例。** 重复打开的后果不是"多一个窗口"这么轻：
+
+- 多个实例可能同时连同一个 rojo 服务，日志里出现多个并存的 session，`established`/`closed` 的「最后一条」判定失去意义，AI 会对着错误的实例下结论。
+- Studio MCP 面对多实例需要 `set_active_studio` 选靶，选错就是在另一个窗口里取证。
+- 同一个 place 被两个实例打开，各自保存会互相覆盖。
+
+检查与处理：
+
+```bash
+pgrep -fl 'RobloxStudio' | grep -v pgrep     # 有输出 = 已有实例在跑
+```
+
+也可以用 Studio MCP 的 `list_roblox_studios` 看**连着 MCP 的**实例列表（注意：没装/没连 MCP 插件的实例不会出现在这里，`pgrep` 才是进程层的真相）。
+
+- 已有实例打开的就是目标 place 且连接正常 → **不要重开**，直接用它。
+- 已有实例是别的 place / 状态异常 → 先关掉再开新的。**关之前必须确认没有 Studio 内未保存的手动改动**（那部分不在 rojo 管辖，关掉即丢）；有疑问就问用户，不要擅自 `quit`。授权后：
+
+  ```bash
+  osascript -e 'quit app "RobloxStudio"'      # 有未保存改动会弹保存对话框，需人工处理
+  pgrep -f 'RobloxStudio' || echo "已全部退出"   # 确认真的退干净了再开新的
+  ```
+
+  `quit` 是异步的，务必等到 `pgrep` 查不到进程再执行 `open`，否则新 place 可能被并进旧进程或直接被忽略。
 
 ---
 
@@ -175,6 +203,8 @@ echo "推送次数: $(grep -c 'Sending batch' $LOG)"
    ```
 
    ⚠️ **关 Studio 前先确认没有未保存的手动改动**——Studio 里手改的东西不在 rojo 管辖范围，重开即丢。有疑问就先问用户，别擅自关。
+
+   ⚠️ **确认旧实例真的退干净了再 `open`**（`pgrep -f 'RobloxStudio'` 无输出），否则会变成重复打开，日志里多 session 并存、MCP 取证选错靶。完整规则见技巧一的「打开 place 前必做：清掉已有实例」。
 
 4. **确认恢复**：日志出现**新的** `established`（新 session uuid），然后随便改一个映射内的文件，看是否新增 `Sending batch`：
 
