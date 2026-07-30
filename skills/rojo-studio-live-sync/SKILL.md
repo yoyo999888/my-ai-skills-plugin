@@ -1,6 +1,6 @@
 ---
 name: rojo-studio-live-sync
-description: 用 rojo serve 做 Roblox Studio 热同步开发的两个关键技巧——让 Studio 每次打开都自动重连服务器（placeId/gameId + roblox-studio 协议启动），以及 AI 如何从 `rojo serve -v` 日志判断 Studio 是否连着、改的文件有没有真同步进去。触发词：rojo 自动重连、rojo serve、rojo 热同步、studio 连不上 rojo、判断 studio 断开、文件同步成功没、rojo 日志。
+description: 用 rojo serve 做 Roblox Studio 热同步开发的三件事——让 Studio 每次打开都自动重连服务器（placeId/gameId + roblox-studio 协议启动）、AI 如何从 `rojo serve -v` 日志判断 Studio 是否连着及改动有没有真同步进去、以及连接异常时的恢复流程（清残留进程重启服务 + 重开 Studio）。触发词：rojo 自动重连、rojo serve、rojo 热同步、studio 连不上 rojo、判断 studio 断开、文件同步成功没、rojo 日志、重启 rojo、rojo 端口占用。
 ---
 
 # rojo-studio-live-sync
@@ -12,6 +12,7 @@ description: 用 rojo serve 做 Roblox Studio 热同步开发的两个关键技�
 - 要开一个 Studio 热同步开发环境，希望 Studio 一打开就自动连上 rojo。
 - 改了文件后需要确认「Studio 还连着吗」「这次改动到底同步进去了吗」。
 - 用户报"Studio 里没变化"，要定位是 rojo 没看见文件、还是 Studio 断了、还是 Studio 收了没应用。
+- 连接坏了要恢复：重启 rojo 服务、清端口占用、重开 Studio。
 
 ---
 
@@ -133,3 +134,52 @@ LOG=/tmp/rojo.log
 echo "连接: $(grep -E 'subscription (established|closed)' $LOG | tail -1)"
 echo "推送次数: $(grep -c 'Sending batch' $LOG)"
 ```
+
+---
+
+## 技巧三：连接异常的恢复（本地开发可直接做）
+
+本地开发环境里 rojo 服务和 Studio 都是本机进程，**AI 可以自行重启服务**，不必等用户；只有「关掉 Studio」这一步需要交代给用户或用 Studio MCP 触发。
+
+### 判定为「连接异常」的信号
+
+- 日志最后一条是 `closed`，但用户认为 Studio 还开着 / 插件还显示 Connected（两侧状态不一致）。
+- 改文件后反复没有新 `Sending batch`，且文件确实在 `tree` 映射内。
+- 日志里短时间内大量 `established` / `closed` 交替（重连风暴）。
+- 端口占用报错（`Address already in use`）或 Studio 插件报连不上。
+- MCP 读回的实例内容与磁盘长期不一致（推送到了，Studio 没落地）。
+
+### 恢复步骤（按顺序，不要跳）
+
+1. **杀掉旧 rojo 服务**——重连风暴和端口占用最常见的根因就是**残留的旧 serve 进程还占着端口**，新起的那个其实没在服务：
+
+   ```bash
+   pgrep -fl 'rojo serve'                 # 先看有几个，别盲杀
+   pkill -f 'rojo serve'                  # 或按 PID: kill <PID>
+   lsof -ti :34872 | xargs -r kill        # 端口还被占就按端口清
+   ```
+
+2. **重启服务并确认起来了**（日志要重新落文件，别复用旧日志——否则行数计数和"最后一条"判定会串）：
+
+   ```bash
+   rojo serve <project>.project.json --port 34872 -v > /tmp/rojo.log 2>&1 &
+   sleep 1 && curl -sf "http://localhost:34872/api/rojo" > /dev/null && echo "服务已就绪"
+   ```
+
+   `/api/rojo` 通得说明 HTTP 服务活着——但**它跟 Studio 有没有连上无关**，别拿它当连接状态判据，连接状态只看日志里的 `established`/`closed`。
+
+3. **关闭 Studio 再重新打开**。重启服务后旧的 WebSocket 已死，Studio 插件的自动重连不一定能跨服务重启恢复，**整个 Studio 重开最干净**（只点插件的 Disconnect/Connect 常常不够）。
+
+   ```bash
+   open "roblox-studio:1+launchmode:edit+task:EditPlace+placeId:<PLACE_ID>+universeId:<UNIVERSE_ID>"
+   ```
+
+   ⚠️ **关 Studio 前先确认没有未保存的手动改动**——Studio 里手改的东西不在 rojo 管辖范围，重开即丢。有疑问就先问用户，别擅自关。
+
+4. **确认恢复**：日志出现**新的** `established`（新 session uuid），然后随便改一个映射内的文件，看是否新增 `Sending batch`：
+
+   ```bash
+   grep -E 'subscription (established|closed)' /tmp/rojo.log | tail -1   # 应为 established
+   ```
+
+5. 仍然不通，才往「非连接问题」查：`tree` 映射是否覆盖该文件、Studio 打开的 place 是否与 `placeId`/`gameId` 匹配（不匹配则自动重连不生效）、Rojo 插件版本与 rojo CLI 是否同代（7.x 对 7.x）、是否处在 Play 态。
