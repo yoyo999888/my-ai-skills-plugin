@@ -1,6 +1,6 @@
 ---
 name: rojo-studio-live-sync
-description: 用 rojo serve 做 Roblox Studio 热同步开发的完整规程——固定 34872 端口、Studio 自动重连（需先手工连一次建缓存 + placeId/gameId + roblox-studio 协议启动）、从 `rojo serve -v` 日志判断 Studio 是否连着及改动有没有真同步进去、以及连接异常的恢复（重启服务必须连带重启 Studio）。触发词：rojo 自动重连、rojo serve、rojo 热同步、studio 连不上 rojo、判断 studio 断开、文件同步成功没、rojo 日志、重启 rojo、rojo 端口占用、34872。
+description: 用 rojo serve 做 Roblox Studio 热同步开发的完整规程——固定 34872 端口、Studio 自动重连（需先手工连一次建缓存 + placeId/gameId + roblox-studio 协议启动）、从 `rojo serve -v` 日志判断 Studio 是否连着及改动有没有真同步进去、连接异常的恢复（重启服务必须连带重启 Studio）、以及日常改代码要不要重启 Studio（不用，靠热同步；Play 态下改动不落地，需回 Edit 态而非重开 Studio）。触发词：rojo 自动重连、rojo serve、rojo 热同步、studio 连不上 rojo、判断 studio 断开、文件同步成功没、rojo 日志、重启 rojo、rojo 端口占用、34872、要不要重启 studio、play 态不同步、停止运行再同步。
 ---
 
 # rojo-studio-live-sync
@@ -25,6 +25,8 @@ description: 用 rojo serve 做 Roblox Studio 热同步开发的完整规程—�
 3. **重启 rojo 服务 ⇒ 必须连带关闭并重开 Studio**。服务重启后旧 WebSocket 已死，Studio 插件的自动重连不保证能跨服务重启恢复，而且 Studio 侧可能停在「显示 Connected 但实际不通」的假状态。只点插件的 Disconnect/Connect 常常不够——**整个 Studio 重开是唯一可靠路径**。
 
 4. **`Sending batch` ≠ Studio 已应用**。日志只能证明 rojo 把 patch 发出去了。「Studio 里已经是新代码」这个结论必须去 Studio 内存态取证，见 §2.4。
+
+5. **日常改代码不用重启 Studio，靠热同步落地。** 只有两种情况才需要重开 Studio：**① rojo 服务重启过**（铁律 3）；**② 版本错乱**（Rojo 插件版本与 rojo CLI 不同代、或 Studio 状态显示与实际不一致，见 §3.1）。除此之外，每次改完文件坐等热同步推送即可，不要习惯性重开 Studio。**但 Play 态下 Rojo 不推送**（Rojo 不改运行中的实例）——改完代码要让同步落地，必须先回 Edit 态（停止 Play），不需要关 Studio；见 §1.4。
 
 ---
 
@@ -117,6 +119,16 @@ Studio MCP 的 `list_roblox_studios` 只能看到**连着 MCP 的**实例；没�
 
   ⚠️ **关之前必须确认没有 Studio 内未保存的手动改动**——Studio 里手改的东西不在 rojo 管辖范围，关掉即丢。有疑问就问用户，不要擅自 `quit`。
   ⚠️ **`quit` 是异步的**，有未保存改动还会弹保存对话框（需人工处理）。务必等到 `pgrep` 查不到进程再 `open`，否则新 place 可能被并进旧进程或直接被忽略。
+
+### 1.4 日常改代码要不要重启 Studio
+
+**不要。** Studio 只在铁律 5 的两种情况下才需要重开：rojo 服务重启过、或版本错乱。日常改代码流程是「改文件 → rojo 热同步推送 → 去 Studio 内存态确认」，全程不碰 Studio 进程。习惯性重开 Studio 只是白白浪费时间（重新加载 place、重新连接、之前的手动调试状态全丢）。
+
+**例外：Play 态下 Rojo 不推送。** Rojo 只同步「运行中的实例」之外的 DataModel，处于 Play 态时改动会被 rojo 正常发送（`Sending batch` 照常出现），但 Studio 不会把它应用到当前正在跑的这份实例上——即便日志显示已推送，§2.4 的「Sending batch ≠ Studio 已应用」在 Play 态下几乎必然成立。要让改动真正落地：
+
+1. 停止 Play（回到 Edit 态）——**不需要关 Studio**，只是停止运行。
+2. 回到 Edit 态后 rojo 侧此前推送的（或紧接着新推送的）改动才会落进 DataModel；必要时改一下文件触发一次新推送，或等 Studio 重新应用已收到的 patch。
+3. 用 `get_studio_state` 确认已经不在 Play 态，再用 §2.4 的内存态取证方法（`script_read` / `inspect_instance`）确认改动生效。
 
 ---
 
