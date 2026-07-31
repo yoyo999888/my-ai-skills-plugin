@@ -18,6 +18,8 @@ def main():
     ap.add_argument("--model", help="覆盖默认模型")
     ap.add_argument("--tasks", help="任务 JSON 文件，'-' 表示读 stdin；每项 {prompt, resume?}")
     ap.add_argument("--timeout", type=float, default=1800, help="总超时秒数")
+    ap.add_argument("--emit", help="每完成一个执行者就往该文件追加一行 JSON（用于外部实时监听）")
+    ap.add_argument("--trace", help="记录所有工具调用（含 read_file/ask 等不触发审批的只读工具）到该 JSONL")
     ap.add_argument("prompts", nargs="*", help="直接给的任务文本")
     a = ap.parse_args()
 
@@ -74,6 +76,10 @@ def main():
                 send({"jsonrpc": "2.0", "id": mid, "result": {
                     "outcome": {"outcome": "selected", "optionId": pick.get("optionId")} if pick
                                else {"outcome": "cancelled"}}})
+                if a.trace:
+                    with open(a.trace, "a") as fh:
+                        fh.write(json.dumps({"kind": "permission_request",
+                                             "params": m.get("params")}, ensure_ascii=False) + "\n")
                 log(f"auto-approve: {m['params'].get('toolCall', {}).get('title', '?')}")
                 continue
             if meth and mid is not None and meth.startswith(("fs/", "terminal/")):
@@ -100,8 +106,18 @@ def main():
                 sid = m["params"].get("sessionId")
                 i = idx_of.get(sid)
                 u = m["params"].get("update", {})
-                if i is not None and live[i] and u.get("sessionUpdate") == "agent_message_chunk":
+                kind = u.get("sessionUpdate")
+                if i is not None and live[i] and kind == "agent_message_chunk":
                     text[i].append(u.get("content", {}).get("text", ""))
+                elif a.trace and kind in ("tool_call", "tool_call_update"):
+                    rec = {"index": i, "kind": kind, "status": u.get("status"),
+                           "title": u.get("title"), "toolName": u.get("toolName") or u.get("kind"),
+                           "rawInput": u.get("rawInput"), "toolCallId": u.get("toolCallId")}
+                    with open(a.trace, "a") as fh:
+                        fh.write(json.dumps(rec, ensure_ascii=False) + "\n"); fh.flush()
+                    if kind == "tool_call":
+                        nm = rec["toolName"] or rec["title"] or "?"
+                        log(f"#{i} tool: {str(nm)[:60]}")
 
             # session/prompt 的响应：id 用 2000+index
             elif isinstance(mid, int) and 2000 <= mid < 3000:
@@ -113,6 +129,10 @@ def main():
                               "error": m.get("error"),
                               "text": "".join(text[i]).strip()}
                 done += 1
+                if a.emit:
+                    with open(a.emit, "a") as fh:
+                        fh.write(json.dumps(results[i], ensure_ascii=False) + "\n")
+                        fh.flush()
                 log(f"#{i} 完成 ({r.get('stopReason')}) {done}/{n}")
                 if done == n:
                     finished.set()

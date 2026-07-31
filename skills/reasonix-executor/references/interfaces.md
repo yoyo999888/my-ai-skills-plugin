@@ -96,3 +96,22 @@ reasonix serve [--addr HOST:PORT] [--auth none|token|password] [--token STR|--to
 
 `reasonix.toml` 优先级：flag > `./reasonix.toml` > `~/.reasonix/config.toml` > 内置默认。
 密钥通过 `api_key_env` 从环境变量注入。`reasonix setup` 交互生成配置。
+
+## 工具调用的可观测性（ACP）
+
+`session/update` 里 `sessionUpdate` 的取值：`agent_message_chunk`、`agent_thought_chunk`、
+`tool_call`、`tool_call_update`、`plan`、`available_commands_update`。
+
+**只收 `session/request_permission` 是不够的**——只读工具不申请权限，压根不会出现在审批流里。
+要完整看到执行者干了什么，必须收 `tool_call` 事件（`scripts/acp_pool.py --trace` 已实现）。
+
+实测到的 `toolName` 取值：`execute`（跑命令）、`edit`（写文件）、`other`。
+**`ask` 工具归在 `other` 下**，真正的问题文本在 `rawInput.questions[]` 里：
+
+```json
+{"kind":"tool_call","toolName":"other",
+ "rawInput":{"questions":[{"header":"None 语义","question":"当 base 有键 K 且 override[K] 为 None 时…"}]}}
+```
+
+无人值守时这个提问不会有人回答，而代理往往会自行编造一个答复继续执行 —— 见 SKILL.md
+「委派提示词模板」。
