@@ -115,3 +115,28 @@ reasonix serve [--addr HOST:PORT] [--auth none|token|password] [--token STR|--to
 
 无人值守时这个提问不会有人回答，而代理往往会自行编造一个答复继续执行 —— 见 SKILL.md
 「委派提示词模板」。
+
+## acp_pool.py 的失败语义
+
+任务级失败会**立即收口**（不再拖到全局 `--timeout`），结果条目形如：
+
+```json
+{"index":1,"stopReason":"error","error":{"code":-32603,"message":"session/new: unknown model \"xxx\""},"text":""}
+```
+
+覆盖的快速失败场景（均已用真 reasonix 实测）：
+
+| 场景 | 行为 |
+|---|---|
+| `resume` 一个不存在的会话 | 0.4s 失败，带 `session/load: invalid sessionId` |
+| 模型名错误等 `session/new` 失败 | 0.4s 失败，带服务端原文 |
+| 子进程提前退出/崩溃 | 未收口的任务标记 `child_exited` + `returncode` |
+| 多个任务 resume 同一会话 | **投递前**即报错退出（同一会话只能被一个任务续接） |
+| 单条消息格式异常 | reader 跳过该条并记日志，不影响其余任务 |
+
+退出码：全部完成且无失败 → 0；任何失败或超时 → 1。
+
+**仍靠全局超时兜底的唯一场景**：子进程活着但不响应（挂起，非退出）。
+
+**已知竞态（未修）**：超时路径直接 `terminate()` + print，不 `join` daemon reader，
+极端情况下超时可能返回空数组而非失败条目（退出码仍为 1）。要严格一致需在退出前 join reader。
