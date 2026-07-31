@@ -55,9 +55,24 @@ def main():
                          f"同一会话只能被一个任务续接，请去重后重试")
             seen_resume[r] = i
 
+    # F6：启动前先给可操作的错误信息；stderr 用 PIPE + 后台线程排空，
+    #      既保留 reasonix 的诊断输出，又不会因管道写满把子进程阻塞死。
+    cwd = pathlib.Path(a.cwd)
+    if not cwd.is_dir():
+        sys.exit(f"工作目录不存在：{a.cwd}")
     cmd = ["reasonix", "acp"] + (["--model", a.model] if a.model else [])
-    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                         stderr=subprocess.DEVNULL, text=True, bufsize=1, cwd=a.cwd)
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, bufsize=1, cwd=a.cwd)
+    except FileNotFoundError:
+        sys.exit("reasonix 未找到：请确认 reasonix 已安装且在 PATH 中（可用 `reasonix --version` 验证）")
+    except Exception as e:
+        sys.exit(f"启动 reasonix 失败：{e}")
+
+    def drain_stderr():
+        for line in p.stderr:
+            print(f"[reasonix] {line}", file=sys.stderr, end="", flush=True)
+    threading.Thread(target=drain_stderr, daemon=True).start()
 
     wlock = threading.Lock()
     def send(m):
@@ -211,11 +226,18 @@ def main():
 
     for i, t in enumerate(tasks):
         params = {"cwd": a.cwd, "mcpServers": []}
-        if t.get("resume"):
-            send({"jsonrpc": "2.0", "id": 1000 + i, "method": "session/load",
-                  "params": dict(params, sessionId=t["resume"])})
-        else:
-            send({"jsonrpc": "2.0", "id": 1000 + i, "method": "session/new", "params": params})
+        try:
+            if t.get("resume"):
+                send({"jsonrpc": "2.0", "id": 1000 + i, "method": "session/load",
+                      "params": dict(params, sessionId=t["resume"])})
+            else:
+                send({"jsonrpc": "2.0", "id": 1000 + i, "method": "session/new", "params": params})
+        except (BrokenPipeError, ValueError) as e:
+            # F6：子进程已退出/管道已关，投递失败给出可操作报错（含上面的 [reasonix] 诊断）
+            sys.exit(f"reasonix 子进程已退出（{e}），任务 #{i} 投递失败；"
+                     f"请查看上方 [reasonix] 前缀的诊断输出")
+        except Exception as e:
+            sys.exit(f"投递任务 #{i} 失败：{e}")
     log(f"已投递 {n} 个任务")
 
     ok = finished.wait(a.timeout)

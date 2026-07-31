@@ -44,7 +44,8 @@ rx adopt frompool 7cc8787f-263c-4795-9d17-e878bda9d3fe --dir /path/to/repo  # �
 每轮都会把 `session_id` 和会话路径打到 stderr，成本累计写进登记。
 登记默认在 `~/.reasonix-crew/`（`RX_HOME` 可改）；`rx rm` 只删登记，不删会话文件。
 
-参数：`--dir` 工作目录、`--model` 换模型、`--perm` 权限模式（默认 `auto`，否则非交互下工具调用会被静默挡住）。
+参数：`--dir` 工作目录、`--model` 换模型、`--perm` 权限模式（默认 `auto`，否则非交互下工具调用会被静默挡住）、
+`--timeout` 单轮超时（默认 3600s，reasonix 挂死时不会永久卡住）、`--copy` 会话被别的进程占用时复制一份继续。
 
 ## 模式 B：一批执行者并发
 
@@ -75,7 +76,7 @@ echo '[{"prompt":"新任务"},{"prompt":"追问","resume":"<sessionId>"}]' \
 
 ## 为什么必须有那份守则
 
-A/B 实测（同模型同任务，唯一变量是 `guard.md`）：
+A/B 实测（**deepseek-v4-flash / reasonix v1.18.0**，同模型同任务，唯一变量是 `guard.md`）：
 
 | | 开头指出需求冲突 | 幻觉出「用户已确认」 | 写明服从哪条+理由 |
 |---|---|---|---|
@@ -94,4 +95,6 @@ A/B 实测（同模型同任务，唯一变量是 `guard.md`）：
 - **别用「取 mtime 最新的 jsonl」猜会话**，并发时必然抢错。
 - **一个 serve 进程只有一个活跃会话**（`/new` 会把当前会话换掉，跑起来时连切换都被禁）。要 N 个并发执行者用模式 B。
 
-接口细节（serve 完整 HTTP API、ACP 能力与事件、会话文件布局）见 `references/interfaces.md`。
+- 接口细节（serve 完整 HTTP API、ACP 能力与事件、会话文件布局）见 `references/interfaces.md`。
+- **实测结论与已知问题**（能力基线 9/9、A/B 守则实验、14 条自审复验、仍未修的问题）见 `references/verification.md`。
+  该文件所有数据基于 **deepseek-v4-flash（4.0 flash）+ reasonix v1.18.0**，换模型或版本结论不一定成立。
