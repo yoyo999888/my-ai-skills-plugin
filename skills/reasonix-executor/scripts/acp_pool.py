@@ -10,7 +10,7 @@
       transcriptPath 之后可用 `reasonix run -p --resume <path> "追问"` 继续（已验证互通）。
 进度：写到 stderr，不污染 stdout。
 """
-import argparse, json, subprocess, sys, threading, time
+import argparse, json, pathlib, subprocess, sys, threading, time
 
 def main():
     ap = argparse.ArgumentParser()
@@ -20,6 +20,9 @@ def main():
     ap.add_argument("--timeout", type=float, default=1800, help="总超时秒数")
     ap.add_argument("--emit", help="每完成一个执行者就往该文件追加一行 JSON（用于外部实时监听）")
     ap.add_argument("--trace", help="记录所有工具调用（含 read_file/ask 等不触发审批的只读工具）到该 JSONL")
+    ap.add_argument("--no-guard", action="store_true",
+                    help="不追加无人值守守则（默认追加 scripts/guard.md，防止代理编造「用户已确认」）")
+    ap.add_argument("--guard-file", help="用自定义守则文件替换内置 guard.md")
     ap.add_argument("prompts", nargs="*", help="直接给的任务文本")
     a = ap.parse_args()
 
@@ -31,6 +34,16 @@ def main():
         tasks = [{"prompt": p} for p in a.prompts]
     if not tasks:
         sys.exit("没有任务")
+
+    # 无人值守守则：默认给每个任务追加，调度者不必手抄
+    if not a.no_guard:
+        gf = pathlib.Path(a.guard_file) if a.guard_file else pathlib.Path(__file__).parent / "guard.md"
+        if gf.exists():
+            guard = gf.read_text().strip()
+            for t in tasks:
+                t["prompt"] = t["prompt"].rstrip() + "\n\n---\n\n" + guard
+        elif a.guard_file:
+            sys.exit(f"守则文件不存在：{gf}")
 
     cmd = ["reasonix", "acp"] + (["--model", a.model] if a.model else [])
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,

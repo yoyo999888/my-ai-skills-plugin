@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""rx —— 具名 reasonix 执行者，状态自动续接，调度者不用管 session id。
+
+    rx spawn <名字> "任务"  [--dir D] [--model M]   新建执行者并派第一个任务
+    rx ask   <名字|session_id|会话路径> "追问"      让它接着上次的上下文干
+    rx adopt <名字> <session_id|会话路径>           把已有会话（如 acp_pool 产出的）收编成具名执行者
+    rx ls                                           看所有执行者
+    rx show  <名字>                                 看它的会话文件和最近产出
+    rx rm    <名字>                                 删掉登记（不删会话文件）
+
+默认给每轮 prompt 追加无人值守守则（guard.md），用 --no-guard 关掉。
+"""
+import argparse, json, os, pathlib, subprocess, sys
+
+HOME = pathlib.Path(os.environ.get("RX_HOME", pathlib.Path.home() / ".reasonix-crew"))
+GUARD = pathlib.Path(__file__).parent / "guard.md"
+
+def reg(name): return HOME / f"{name}.json"
+
+def load_guard(off):
+    if off or not GUARD.exists(): return ""
+    return "\n\n---\n\n" + GUARD.read_text().strip()
+
+def find_session(sid):
+    for base in [pathlib.Path.home() / ".reasonix" / "projects",
+                 pathlib.Path.home() / ".reasonix" / "sessions"]:
+        for p in base.rglob(f"{sid}.jsonl"):
+            return p
+    return None
+
+def resolve(handle):
+    """handle 可以是登记名、裸 session id、或会话文件路径。返回 (meta, 登记名或 None)。"""
+    if reg(handle).exists():
+        return json.loads(reg(handle).read_text()), handle
+    p = pathlib.Path(handle)
+    if p.suffix == ".jsonl" and p.exists():
+        return {"session": str(p), "session_id": p.stem, "dir": os.getcwd(), "turns": 0}, None
+    f = find_session(handle)
+    if f:
+        return {"session": str(f), "session_id": handle, "dir": os.getcwd(), "turns": 0}, None
+    sys.exit(f"无法解析句柄 {handle!r}：既不是已登记的名字，也找不到对应会话文件")
+
+
+def call(args, task, resume=None, want_json=False):
+    cmd = ["reasonix", "run", "--dir", args["dir"], "--permission-mode", args.get("perm", "auto")]
+    if args.get("model"): cmd += ["--model", args["model"]]
+    if resume: cmd += ["--resume", str(resume)]
+    cmd += ["--output-format", "json"] if want_json else ["-p"]
+    cmd.append(task)
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"reasonix 失败：{r.stderr.strip() or r.stdout.strip()}")
+    return r.stdout
+
+def cmd_spawn(a):
+    HOME.mkdir(parents=True, exist_ok=True)
+    if reg(a.name).exists(): sys.exit(f"执行者 {a.name} 已存在，用 rx ask 继续，或 rx rm 后重建")
+    meta = {"dir": str(pathlib.Path(a.dir).resolve()), "model": a.model, "perm": a.perm}
+    out = call(meta, a.task + load_guard(a.no_guard), want_json=True)
+    try:
+        res = json.loads(out.strip().splitlines()[-1])
+    except Exception:
+        sys.exit(f"解析 reasonix 输出失败：{out[:400]}")
+    sess = find_session(res["session_id"])
+    if not sess: sys.exit(f"找不到会话文件 {res['session_id']}.jsonl")
+    meta.update(session=str(sess), session_id=res["session_id"], turns=1,
+                cost=res.get("total_cost_usd", 0))
+    reg(a.name).write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    print(res.get("result", ""))
+    print(f"\n[{a.name}] session_id={meta['session_id']}\n[{a.name}] session={meta['session']}\n"
+          f"[{a.name}] 第 1 轮 · 累计 US${meta['cost']:.4f}", file=sys.stderr)
+
+def cmd_ask(a):
+    meta, name = resolve(a.name)
+    out = call(meta, a.task + load_guard(a.no_guard), resume=meta["session"], want_json=True)
+    try:
+        res = json.loads(out.strip().splitlines()[-1])
+    except Exception:
+        sys.exit(f"解析 reasonix 输出失败：{out[:400]}")
+    meta["turns"] = meta.get("turns", 0) + 1
+    meta["cost"] = round(meta.get("cost", 0) + res.get("total_cost_usd", 0), 6)
+    if name: reg(name).write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    print(res.get("result", ""))
+    tag = name or meta["session_id"]
+    print(f"\n[{tag}] session_id={meta['session_id']}\n"
+          f"[{tag}] 第 {meta['turns']} 轮 · 累计 US${meta['cost']:.4f}", file=sys.stderr)
+
+def cmd_adopt(a):
+    """把已有会话（如 acp_pool 产出的 sessionId/transcriptPath）登记成具名执行者。"""
+    HOME.mkdir(parents=True, exist_ok=True)
+    if reg(a.name).exists(): sys.exit(f"{a.name} 已存在")
+    meta, _ = resolve(a.session)
+    meta["dir"] = str(pathlib.Path(a.dir).resolve())
+    meta.setdefault("model", a.model); meta.setdefault("perm", a.perm)
+    meta.setdefault("cost", 0.0)
+    reg(a.name).write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    print(f"已收编 {a.name} → session_id={meta['session_id']}\n  {meta['session']}")
+
+
+def cmd_ls(a):
+    if not HOME.exists() or not any(HOME.glob("*.json")): return print("还没有执行者")
+    print(f"{'名字':<12}{'轮次':<5}{'累计成本':<11}{'session_id':<44}{'工作目录'}")
+    for p in sorted(HOME.glob("*.json")):
+        m = json.loads(p.read_text())
+        print(f"{p.stem:<12}{m.get('turns',0):<5}US${m.get('cost',0):<8.4f}  "
+              f"{m.get('session_id','?'):<44}{m['dir']}")
+
+def cmd_show(a):
+    if not reg(a.name).exists(): sys.exit(f"没有叫 {a.name} 的执行者")
+    m = json.loads(reg(a.name).read_text())
+    print(json.dumps(m, ensure_ascii=False, indent=2))
+
+def cmd_rm(a):
+    if reg(a.name).exists(): reg(a.name).unlink(); print(f"已删除登记 {a.name}（会话文件保留）")
+    else: sys.exit(f"没有叫 {a.name} 的执行者")
+
+ap = argparse.ArgumentParser(description="具名 reasonix 执行者")
+sub = ap.add_subparsers(dest="cmd", required=True)
+def common(p):
+    p.add_argument("--dir", default=".", help="工作目录")
+    p.add_argument("--model"); p.add_argument("--perm", default="auto")
+    p.add_argument("--no-guard", action="store_true")
+s = sub.add_parser("spawn"); s.add_argument("name"); s.add_argument("task"); common(s); s.set_defaults(f=cmd_spawn)
+s = sub.add_parser("ask");   s.add_argument("name"); s.add_argument("task"); s.add_argument("--no-guard", action="store_true"); s.set_defaults(f=cmd_ask)
+s = sub.add_parser("adopt"); s.add_argument("name"); s.add_argument("session")
+common(s); s.set_defaults(f=cmd_adopt)
+s = sub.add_parser("ls");    s.set_defaults(f=cmd_ls)
+s = sub.add_parser("show");  s.add_argument("name"); s.set_defaults(f=cmd_show)
+s = sub.add_parser("rm");    s.add_argument("name"); s.set_defaults(f=cmd_rm)
+a = ap.parse_args(); a.f(a)
