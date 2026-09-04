@@ -23,6 +23,7 @@ Roblox 引擎闭源、不让写 shader，官方文档在细节上多处与实测
 | 测量方法 | `Stats.FrameRateManager.Batches` 可从 Lua 读；配 `run-in-roblox` 可全自动跑实验 | `references/measurement.md` |
 | 资产上传 | Open Cloud + `rbxcloud` 上传 mesh/贴图的可用流程与两个坑 | `references/asset-upload.md` |
 | **Server Authority** | 服务端跑**完整模拟**不是验证；六开关有 enum/不可读两坑；模拟相禁 `Destroy`；**成本只认云端数字**（真实会话 43% 帧预算，本机低估一倍）；碰撞超线性拐点云端前移；`Camera` 免复制成立且不额外收费 | `references/server-authority.md` |
+| **原生代码生成** | `--!native` 只对纯 Luau 计算有效（社区实测 2~6x）；客户端按设备灰度中、Studio 数字不可信；⚠️ **本条目无本机实测** | `references/native-codegen.md` |
 | 踩过的坑 | 被实测推翻过的 5 条「合理推断」，以及它们为什么听起来对 | `references/lessons.md` |
 
 ## 何时使用
@@ -32,6 +33,7 @@ Roblox 引擎闭源、不让写 shader，官方文档在细节上多处与实测
   或要估算服务端物理成本、载具与 NPC 的规模上限。
 - 要给 Roblox 项目做性能相关的设计决策（美术规格、材质数量、LOD 策略、图集排布、权威模式、
   可用对象密度）。
+- 被问到 `--!native` / `@native` / native codegen / 原生代码生成，或要判断某段热点代码值不值得加。
 - 想把一个新的 Roblox 实测结论沉淀下来。
 
 ## 怎么用
