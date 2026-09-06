@@ -50,6 +50,7 @@ ssh <host> '/opt/homebrew/bin/herdr workspace create --cwd <目录> --no-focus -
 `CronCreate` 用错峰分钟（如 `7-59/20 * * * *` = 每小时 7/27/47），prompt 固化全部巡检逻辑（骨架见 references/templates.md）：
 
 - **扫状态**：本机 `herdr agent list`，远程 `ssh <host> '/opt/homebrew/bin/herdr agent list'`。working 不打扰
+- **停滞检测靠日志增长，不靠追问**（`scripts/fleet-stall.sh`）：每轮先跑它——抓每台 worker pane 全文算 md5 与上次快照比，`changed` = 在干活别打扰，`STILL Nm` = 静止 N 分钟；附尾部空等模式（`sleep N` / `not yet` / `MERGED`）、租约/429 标志、推送日志里的最近推送时间。`STILL` 超过两轮巡检间隔才去读 pane 尾部：空等 → prompt 告知真实状态并令切下一 AC；死亡 → 重启续传。`agent_status=working` 不等于有进展（worker 用 sleep 轮询等一个不存在的 PR 也是 working）——曾因只看状态位漏掉 1h+ 空等。用法：`FLEET_HOSTS="unity:d7 hufan:d1" FLEET_PUSH_LOG=/tmp/dmf-hub-sync.log scripts/fleet-stall.sh`
 - **blocked**：`agent read` 看问题 → 按任务计划精神**自主代答**（需用户预先授权，每次代答记录在案），重大偏离计划才停下上报
 - **死亡/unknown**：读 pane 输出诊断 → `pane run <pane> <alias>` 重启 → `agent rename` 恢复名 → 按 worktree `git log` 判断进度，重发任务书并注明「已完成部分不重做」
 - **资源互斥**：需要排队的资源（前台/锁/独占设备）用标记文件信号——先占者完成临界段后 `touch /tmp/<信号>`，后继 worker 轮询该文件再进入；巡检检查信号与后继者是否推进。**标记文件只在同机可见**（互斥的本质是同机独占资源，跨机本无冲突），任务书里别写别机的信号路径；**新一轮战役开跑前清掉上轮的残留信号文件**（旧信号会让新 worker 误判放行）
