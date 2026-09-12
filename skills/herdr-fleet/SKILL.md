@@ -87,3 +87,6 @@ worker 报告任务完成时，**不采信**，立即发反思任务书（模板
 - **`git worktree add <目录> origin/<分支>` 建出来是 detached HEAD**（不是本地分支）：在里面做合并前先 `git branch --show-current` 检查；`git push` 报 "Everything up-to-date" 而远端明明是旧 commit，先怀疑本地分支根本不存在（detached HEAD 上推了个寂寞）——`git branch -f <分支> <HEAD>` 再推
 - worker 上下文打满（100%）仍能继续干活（runner 自动 compact），小时级战役不必中途换会话；轮次安排按内容多少，不按上下文余量
 - **`workspace create` 返回的 workspace_id 在 `result.workspace.workspace_id`**（嵌在 workspace 对象里，不是 `result.workspace_id` 顶层键）——解析取错键得到空串，后续 pane 命令全报 `pane :p1 not found`；幂等复用已有 workspace 走 `workspace list` 按 label 匹配（2026-09-12 六机部署实犯）
+- **部署前核目标机 `~/.claude/settings.json` 的 `env.ENABLE_TOOL_SEARCH`**：true 时 glm worker 会丢 Bash/Read/Write/Edit（工具被 defer 进 ToolSearch 入口，GLM 检索不回，自述「只能网页检索」）；且 settings env **优先于进程 env**（前置 `ENABLE_TOOL_SEARCH=false` 压不过），唯一修复=alias 带 `CLAUDE_CONFIG_DIR=<隔离目录>`（2026-09-12 duanxin/ly 实锤，同机另一 worker 正常≠没毒，非确定性命中）
+- **`pane send-text` 不带回车，`--enter` 不是合法标志**（会被当文本粘进输入行，整条命令不执行）；发要执行的命令一律 `pane run <pane> <command>`（text+Enter 一步）
+- **退出交互 claude 会话发 `/exit`**：裸 `exit` 被当 prompt 发给模型，会话不退，后续 rename/过框全作用在旧会话上；重建定式=`pane run <pane> "/exit"` → 4s → `pane run <pane> "source ~/.zshrc >/dev/null 2>&1; glm"` → 15s → rename → down+enter 过框（2026-09-12 定式）
