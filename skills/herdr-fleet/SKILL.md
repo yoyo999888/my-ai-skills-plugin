@@ -86,3 +86,4 @@ worker 报告任务完成时，**不采信**，立即发反思任务书（模板
 - 巡检发现的外部依赖断了（如常驻 bridge/daemon）要先修依赖再重启 worker：daemon 类进程裸 nohup 常因 stdin EOF 自杀，用 `nohup zsh -c "exec tail -f /dev/null | <daemon>" &` 保活
 - **`git worktree add <目录> origin/<分支>` 建出来是 detached HEAD**（不是本地分支）：在里面做合并前先 `git branch --show-current` 检查；`git push` 报 "Everything up-to-date" 而远端明明是旧 commit，先怀疑本地分支根本不存在（detached HEAD 上推了个寂寞）——`git branch -f <分支> <HEAD>` 再推
 - worker 上下文打满（100%）仍能继续干活（runner 自动 compact），小时级战役不必中途换会话；轮次安排按内容多少，不按上下文余量
+- **`workspace create` 返回的 workspace_id 在 `result.workspace.workspace_id`**（嵌在 workspace 对象里，不是 `result.workspace_id` 顶层键）——解析取错键得到空串，后续 pane 命令全报 `pane :p1 not found`；幂等复用已有 workspace 走 `workspace list` 按 label 匹配（2026-09-12 六机部署实犯）
