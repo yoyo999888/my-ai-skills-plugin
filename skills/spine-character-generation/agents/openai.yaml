@@ -1,0 +1,4 @@
+interface:
+  display_name: "Spine 独立角色生成与动态验收"
+  short_description: "从完整部件生成到绑定适配、动作重定向及官方运行时动态验收"
+  default_prompt: "请使用 $spine-character-generation，先盘点现有 Spine 模板，判断绑定复用范围，再生成独立角色并实际验证动态质量。"
