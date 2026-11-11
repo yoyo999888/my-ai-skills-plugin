@@ -1,6 +1,6 @@
 ---
 name: roblox-docs
-description: Roblox 引擎经验知识库，按条目索引已经实测验证过的结论（渲染合批、LOD、资产上传、Server Authority 与物理成本等）。回答任何 Roblox 性能/渲染/物理/权威模式/资产问题前先查这里，避免凭直觉或从别的引擎类比。触发词：roblox 性能、draw call、合批、batching、LOD、RenderFidelity、图集、atlas、mip、SurfaceAppearance、上传 asset、Server Authority、AuthorityMode、BindToSimulation、服务端权威、客户端预测、重模拟、PhysicsStepTimeMs、物理成本、NPC 复制、Camera 免复制、roblox-docs。
+description: Roblox 引擎经验知识库，按条目索引已经实测验证过的结论（渲染合批、LOD、资产上传、Server Authority 与物理成本等）。回答任何 Roblox 性能/渲染/物理/权威模式/资产问题前先查这里，避免凭直觉或从别的引擎类比。触发词：roblox 性能、draw call、合批、batching、LOD、RenderFidelity、图集、atlas、mip、SurfaceAppearance、透明、Transparency、overdraw、上传 asset、Server Authority、AuthorityMode、BindToSimulation、服务端权威、客户端预测、重模拟、PhysicsStepTimeMs、物理成本、NPC 复制、Camera 免复制、roblox-docs。
 ---
 
 # roblox-docs
@@ -18,6 +18,7 @@ Roblox 引擎闭源、不让写 shader，官方文档在细节上多处与实测
 | 条目 | 一句话 | 文件 |
 | --- | --- | --- |
 | 渲染合批 | 「东西多」不花 draw call，「种类多」才花；合批键是 `(mesh, 贴图/材质/SurfaceAppearance)`，每多一种组合 +3 批 | `references/rendering-batching.md` |
+| **透明件代价（真机）** | 手机上 `Transparency=1` **不被剔除**，和半透明一样按盖住的屏幕面积花时间（满屏 +6.5 ms）；隐藏要改 `Parent`，编辑用的区域盒别留在 Workspace | `references/transparency-cost.md` |
 | LOD | 阈值按**绝对距离**（非屏幕占比），`Automatic` 只降一档到 50%，`Performance` 五档最低 12 tris | `references/lod.md` |
 | 贴图图集与 mip | 格子边界对齐 2 的幂则 mip 生成零串色；UV 内缩只防 mip 0~2 的采样 | `references/atlas-and-mip.md` |
 | 测量方法 | `Stats.FrameRateManager.Batches` 可从 Lua 读；配 `run-in-roblox` 可全自动跑实验 | `references/measurement.md` |

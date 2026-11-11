@@ -50,8 +50,9 @@ k=1 是唯一例外，只要 2 批（不是 3）。那个 2 是**两个 pass**�
 
 ### 特殊情况
 
-- **`Transparency = 1`：Δ0 batches**，`Indices` 从 7965 掉到 765 —— 基本被完整剔除。
-  **这是最便宜的隐藏方式**，比改 `Parent` 好，可用来做手工 LOD 切换。
+- **`Transparency = 1`：Δ0 batches**（仅 Studio 2026-07），`Indices` 从 7965 掉到 765 —— 基本被完整剔除。
+  ⚠️ **真机不成立**：2026-11 Android 客户端 2.746 上 T=1 照样画，+1 次绘制调用，
+  且和 T=0.5 一样按盖住的屏幕面积花时间（满屏 +6.5 ms）。**隐藏要改 `Parent`**，见 `transparency-cost.md`。
 - **`Transparency = 0.5`：Δ1**，比不透明还**少**一批，`Indices` 也少一半
   （半透明只画部分面、且没有阴影 pass）。「半透明贵」在 draw call 维度不成立，
   贵在 overdraw 和排序，那是像素侧的事。
@@ -76,5 +77,6 @@ k=1 是唯一例外，只要 2 批（不是 3）。那个 2 是**两个 pass**�
 ## 适用边界
 
 - 数据取自 Studio **edit 会话**，不是真实客户端。真机画质等级、后处理都可能不同。
+  已知真机不一致：`Transparency = 1` 在手机上不被剔除（`transparency-cost.md`）。
 - 只验证到 2000 个物体；更大规模未测。
 - `SurfaceAppearance` 的 "identical" 只测了 `ColorMap` 维度，其余贴图通道未单独验证。

@@ -47,6 +47,10 @@
 **切换成本接近零**：用 `Transparency = 1` 隐藏，实测 Δ0 batches（见 `rendering-batching.md`）。
 不需要改 `Parent`。
 
+> ⚠️ 2026-11 真机推翻：Android 客户端 2.746 上 T=1 的件不被剔除，在视野里照样画，
+> 代价和半透明一样按盖住的屏幕面积算（`transparency-cost.md`）。在手机上用 T=1 藏 LOD 档，
+> 等于每个物体多画一遍半透明轮廓。**真机上切 LOD 改 `Parent`**，切换成本未测。
+
 **注意 `MeshPart.MeshId` 运行时不可写**（官方限制）。替代方案是
 `MeshPart:ApplyMesh()`，但它会连碰撞几何一起重建，代价明显。
 所以手工 LOD 的正确做法是**预先摆两个 MeshPart，切 `Transparency`**，
