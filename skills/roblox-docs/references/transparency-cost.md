@@ -56,12 +56,17 @@
    这和 `rendering-batching.md`、`lod.md` 里 Studio 的结论相反，以真机为准。
 3. 半透明的大面（玻璃幕墙、水面、雾片、树叶贴图）同理，**按占屏面积估成本**。
    同一台手机上，3 个透明盒约 6.8 ms，树叶 SurfaceAppearance 半透明约 4～6 ms。
+4. **贴花（Decal）铺大面同样贵。** 同一台手机、画质 5、横屏：一条 30×480 stud 的路面长条贴花，
+   镜头贴着路面往前看时铺满下半屏，摘掉贴花 −1.0～−1.2 ms（3 轮）；连它的透明载体 Part
+   （0.01 厚、平躺）一起摘也是 −1.0～−1.3 ms，载体本身几乎不占屏、不额外花。
+   开车时路面正好铺满下半屏，最贵。**路面这类大面用不透明的（地形材质或不透明网格），
+   贴花只用在占屏小的地方。**
 
 ## 适用边界
 
 - 只测了一台中端 Android、一个画质档（5）。高端机、iOS、PC 未测；
   在显卡不吃满的设备上，帧时间差可能看不出来，但绘制调用 +1 仍然成立。
-- 只测了 `Part`（Plastic）。MeshPart、带贴图或 SurfaceAppearance 的透明件未单独测。
+- 透明件只测了 `Part`（Plastic）；贴花只测了一个机位、一条贴花。MeshPart、带 SurfaceAppearance 的透明件未单独测。
 - **Studio 0.747 和电脑版 Player 这次没复测。** 7 月的 Studio 数据是「T=1 Δ0 batches」；
   是引擎变了还是平台不同，没分清。
 - 手机上 `RenderCPUFrameTime` 和 `RenderGPUFrameTime` 读数相同，都是整帧时间，
